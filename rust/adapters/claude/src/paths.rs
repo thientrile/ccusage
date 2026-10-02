@@ -70,12 +70,24 @@ pub fn usage_files(paths: &[PathBuf], project_filter: Option<&str>) -> Vec<PathB
             project_filter.filter(|filter| is_project_path_segment(filter))
         {
             collect_usage_files(&projects_dir.join(project_filter), &mut files);
-        } else {
+        } else if env::var_os("CCUSAGE_ALL_PROJECTS").is_some() {
             collect_usage_files(&projects_dir, &mut files);
+        } else if let Ok(entries) = fs::read_dir(&projects_dir) {
+            for entry in entries.filter_map(std::result::Result::ok) {
+                if is_miniai_project_dir(&entry.file_name().to_string_lossy()) {
+                    collect_usage_files(&entry.path(), &mut files);
+                }
+            }
         }
     }
     files.sort_by_cached_key(|path| path.to_string_lossy().into_owned());
     files
+}
+
+/// Default scope is the miniai repos only; `CCUSAGE_ALL_PROJECTS=1` lifts it.
+/// Claude names a project dir after its path, e.g. `-home-u-code-miniai-zues`.
+fn is_miniai_project_dir(name: &str) -> bool {
+    name.ends_with("-code-miniai") || name.contains("-code-miniai-")
 }
 
 /// Margin subtracted from the `--since` lower bound before comparing it with
@@ -337,6 +349,14 @@ mod tests {
         path::{Path, PathBuf},
         time::{Duration, UNIX_EPOCH},
     };
+
+    #[test]
+    fn miniai_filter_matches_miniai_repos_only() {
+        assert!(super::is_miniai_project_dir("-home-u-code-miniai"));
+        assert!(super::is_miniai_project_dir("-home-u-code-miniai-zues"));
+        assert!(!super::is_miniai_project_dir("-home-u-code-server"));
+        assert!(!super::is_miniai_project_dir("-home-u-code-miniaix"));
+    }
 
     use ccusage_test_support::fs_fixture;
 
